@@ -36,6 +36,8 @@ NOTE:   String length must be evenly divisible by 16byte (str_len % 16 == 0)
 #include <stdint.h>
 #include <string.h> // CBC mode, for memset
 #include "aes.h"
+#include <stdio.h>
+#include <string.h>
 
 /*****************************************************************************/
 /* Defines:                                                                  */
@@ -449,6 +451,15 @@ static void InvCipher(void)
   AddRoundKey(0);
 }
 
+static void Xor(uint8_t* buf, const uint8_t* buf2)
+{
+  uint8_t i;
+  for(i = 0; i < BLOCKLEN; i++) //the block in AES is always 128bit so 16 bytes!
+  {
+    buf[i] ^= buf2[i];
+  }
+}
+
 
 /*****************************************************************************/
 /* Public functions:                                                         */
@@ -456,8 +467,24 @@ static void InvCipher(void)
 #if defined(ECB) && ECB
 
 
-void AES_ECB_encrypt(const uint8_t* input, const uint8_t* key, uint8_t* output, const uint32_t length)
+void AES_ECB_encrypt( const uint8_t* input, const uint8_t* key, uint8_t* output, const uint32_t length)
 {
+#ifdef AESNI
+    //DEFINE_ROUND_KEYS
+    uint8_t m_expandedKey[keyExpSize];
+    uint8_t keyArray[KEYLEN];
+    memcpy(keyArray, key, KEYLEN);
+    uint8_t m_input[length];
+    memcpy(m_input, input, length);
+    sAesData aesData;
+    aesData.in_block = m_input;
+    aesData.out_block = output;
+    aesData.expanded_key = m_expandedKey;
+    aesData.num_blocks = KEYLEN;
+
+    iEncExpandKey128(keyArray, m_expandedKey);
+    iEnc128(&aesData);
+#else
   // Copy input to output, and work in-memory on output
   memcpy(output, input, length);
   state = (state_t*)output;
@@ -467,10 +494,13 @@ void AES_ECB_encrypt(const uint8_t* input, const uint8_t* key, uint8_t* output, 
 
   // The next function call encrypts the PlainText with the Key using AES algorithm.
   Cipher();
+#endif
 }
 
 void AES_ECB_decrypt(const uint8_t* input, const uint8_t* key, uint8_t *output, const uint32_t length)
 {
+#ifdef AESNI
+#else
   // Copy input to output, and work in-memory on output
   memcpy(output, input, length);
   state = (state_t*)output;
@@ -480,6 +510,7 @@ void AES_ECB_decrypt(const uint8_t* input, const uint8_t* key, uint8_t *output, 
   KeyExpansion();
 
   InvCipher();
+#endif
 }
 
 
@@ -490,16 +521,6 @@ void AES_ECB_decrypt(const uint8_t* input, const uint8_t* key, uint8_t *output, 
 
 
 #if defined(CBC) && CBC
-
-
-static void XorWithIv(uint8_t* buf)
-{
-  uint8_t i;
-  for(i = 0; i < BLOCKLEN; ++i) //WAS for(i = 0; i < KEYLEN; ++i) but the block in AES is always 128bit so 16 bytes!
-  {
-    buf[i] ^= Iv[i];
-  }
-}
 
 void AES_CBC_encrypt_buffer(uint8_t* output, uint8_t* input, uint32_t length, const uint8_t* key, const uint8_t* iv)
 {
@@ -520,7 +541,7 @@ void AES_CBC_encrypt_buffer(uint8_t* output, uint8_t* input, uint32_t length, co
 
   for(i = 0; i < length; i += BLOCKLEN)
   {
-    XorWithIv(input);
+    Xor(input, Iv);
     memcpy(output, input, BLOCKLEN);
     state = (state_t*)output;
     Cipher();
@@ -561,7 +582,7 @@ void AES_CBC_decrypt_buffer(uint8_t* output, uint8_t* input, uint32_t length, co
     memcpy(output, input, BLOCKLEN);
     state = (state_t*)output;
     InvCipher();
-    XorWithIv(output);
+    Xor(output, Iv);
     Iv = input;
     input += BLOCKLEN;
     output += BLOCKLEN;
@@ -576,3 +597,80 @@ void AES_CBC_decrypt_buffer(uint8_t* output, uint8_t* input, uint32_t length, co
 }
 
 #endif // #if defined(CBC) && CBC
+
+#if defined(CFB) && CFB
+
+void phex(uint8_t* str)
+{
+
+    unsigned char i;
+    for(i = 0; i < 16; ++i)
+        printf("%.2x", str[i]);
+    printf("\n");
+}
+
+void AES_CFB_encrypt_buffer(uint8_t *output, uint8_t *input, uint32_t length, const uint8_t *key, const uint8_t *iv)
+{
+    uintptr_t i;
+    //memcpy(output, input, length);
+
+    // Skip the key expansion if key is passed as 0
+    if(0 != key)
+    {
+      Key = key;
+      KeyExpansion();
+    }
+
+    if(iv != 0)
+    {
+      Iv = (uint8_t*)iv;
+    }
+
+    state = (state_t*) Iv;
+
+    for(i = 0; i < length; i += BLOCKLEN)
+    {
+      Cipher();
+      memcpy(output, state, BLOCKLEN);
+
+      phex(output);
+
+      Xor(output, input);
+
+      state = (state_t*) output;
+      input += BLOCKLEN;
+      output += BLOCKLEN;
+      //printf("Step %d - %d", i/16, i);
+    }
+}
+
+void AES_CFB_decrypt_buffer(uint8_t *output, uint8_t *input, uint32_t length, const uint8_t *key, const uint8_t *iv)
+{
+    uintptr_t i;
+    // Skip the key expansion if key is passed as 0
+    if(0 != key)
+    {
+      Key = key;
+      KeyExpansion();
+    }
+
+    if(iv != 0)
+    {
+      Iv = (uint8_t*)iv;
+      state = (state_t*)iv;
+    }
+
+    for(i = 0; i < length; i += BLOCKLEN)
+    {
+      Cipher();
+      Xor(input, (uint8_t*) state);
+      memcpy(output, input, BLOCKLEN);
+
+      state = (state_t*) output;
+      input += BLOCKLEN;
+      output += BLOCKLEN;
+      //printf("Step %d - %d", i/16, i);
+    }
+}
+
+#endif //#if defined(CFB) && CFB

@@ -24,7 +24,7 @@ test.o : test.c
 
 aes.o : aes.h aes.c
 	# compiling aes.c
-	$(CC) $(CFLAGS) -c aes.c -o aes.o
+	$(CC) $(CFLAGS) -c aes.c -o aes.o -I AESNI/include obj/x64/do_rdtsc.o AESNI/asm/x64/intel_aes64.a
 
 test.out : aes.o test.o
 	# linking object code to binary

@@ -1,3 +1,9 @@
+AES-NI/asm/x64/do_rdtsc.s
+AES-NI/asm/x64/iaesx64.s
+AES-NI/asm/x86/do_rdtsc.s
+AES-NI/asm/x86/iaesx86.s
+AES-NI/include/iaes_asm_interface.h
+AES-NI/include/iaesni.h
 README.md
 aes.c
 aes.h
